@@ -95,7 +95,6 @@ def smart_join(massive):
     return '\n'.join(massive)
 
 
-# Немного ослабили регулярки для 100% срабатывания
 dict_of_reg_value_SUPPLY = {
     'CR_number': ['change', 'request', 'no'],
     'Reg_date': ['registration', 'date'],
@@ -181,34 +180,54 @@ def main_func(table_name):
     print(f'\n>>> Обработка файла: {short_table_name}')
     warning = 0
     wb = smart_load_workbook(table_name)
-    ws = wb.worksheets[0]
+
+    # --- НОВЫЙ БЛОК ВЫБОРА ВКЛАДКИ ---
+    ws = None
     for sheet in wb.worksheets:
-        if sheet.sheet_state == 'visible':
+        if 'change request' in sheet.title.lower():
             ws = sheet
+            print(f"    [OK] Найдена целевая вкладка: '{sheet.title}'")
             break
+
+    # Если вкладки с таким именем вдруг нет (страховка), ищем первую видимую
+    if ws is None:
+        print(
+            "    [ВНИМАНИЕ] Вкладка 'Change Request' не найдена! Берем первую видимую.")
+        ws = wb.worksheets[0]
+        for sheet in wb.worksheets:
+            if sheet.sheet_state == 'visible':
+                ws = sheet
+                break
+    # ---------------------------------
+
     cells = ws._cells
     cells = dict(map(lambda x: (x, cells[x].value), cells))
     cells = {
         key: cells[key] if not re_var(['unnamed'], str(cells[key])) else None
         for key in cells}
+
+    if not cells:
+        print("    [ОШИБКА] Выбранная вкладка пуста!")
+        return {}
+
     last_cell = list(cells.keys())[-1]
     first_cell = first_cell_def(cells)
 
     text_dump = " ".join([str(cells[k]).lower() for k in cells if cells[k]])
 
-    # Расширенное условие, чтобы точно не пропустить SUPPLY форму
     if re_var(['supply'], text_dump) or re_var(['поставк'], text_dump):
         doc_mode = 'SUPPLY'
-        print("    Определен тип: SUPPLY (Запрос на изменение к поставке)")
+        print(
+            "    Определен тип документа: SUPPLY (Запрос на изменение к поставке)")
     elif 'cr.d' in text_dump or 'fcr.d' in text_dump or 'impact on tdd' in text_dump:
         doc_mode = 'CRD'
-        print("    Определен тип: CR.D")
+        print("    Определен тип документа: CR.D")
     elif 'field change request' in text_dump or 'fcr' in text_dump:
         doc_mode = 'FCR'
-        print("    Определен тип: FCR")
+        print("    Определен тип документа: FCR")
     else:
         doc_mode = 'CR'
-        print("    Определен тип: CR")
+        print("    Определен тип документа: CR")
 
     if doc_mode == 'CRD':
         dict_of_reg_value_local = dict_of_reg_value_CRD.copy()
@@ -969,18 +988,14 @@ def main_func(table_name):
             row, col = cell_coords
 
             keys_to_remove = []
-            # Итерируемся по списку ключей, чтобы безопасно удалять их
             for position in list(dict_of_reg_value_local.keys()):
                 if header_in_reg(cell_text, position, dict_of_reg_value_local):
-                    # Железобетонный метод извлечения значения (ячейка справа col+1)
-                    # Если сама по себе ячейка col+1 в словаре 'пустая', first_not_empty найдет её
                     _, extracted_value = first_not_empty((row, col + 1), cells,
                                                          'row')
 
                     CR_d[position] = extracted_value
                     keys_to_remove.append(position)
 
-                    # Печатаем прямо в консоль для дебага
                     print(
                         f"      -> Найдено поле '{position}' в {cell_coords}. Значение: '{extracted_value}'")
                     break
@@ -1912,49 +1927,6 @@ def from_diff_to_union_excel(normalized_dict):
         os.makedirs(output_dir, exist_ok=True)
     wb.save(os.path.join(output_dir, file_name.split('\\')[-1]))
     return normalized_dict['File_name']
-
-
-class excel_formating:
-    def __init__(self, ws):
-        self.ws = ws
-
-    def col_width(self, lett_list: list, value):
-        for letter in lett_list:
-            self.ws.column_dimensions[letter].width = value
-
-    def text_alignment(self, place: list or str, hor, vert):
-        if type(place) is list:
-            cell = self.ws.cell(*place)
-        else:
-            cell = self.ws[place]
-        cell.alignment = Alignment(horizontal=hor, vertical=vert,
-                                   wrapText=True)
-
-    def color(self, place: list, start_col: str, end_col: str):
-        cell = self.ws.cell(*place)
-        filling = PatternFill(start_color=start_col, end_color=end_col,
-                              fill_type='solid')
-        cell.fill = filling
-
-    def text_font(self, place: list, text_size: int, text_bold=False):
-        cell = self.ws.cell(*place)
-        cell.font = Font(bold=text_bold, size=text_size)
-
-    def sheet_view(self, page_number):
-        self.ws.sheet_view.view = 'pageBreakPreview'
-        self.ws.page_setup.fitToPage = True
-        self.ws.page_setup.fitToWidth = page_number
-        self.ws.page_setup.fitToHeight = False
-
-    def borders(self, border_type_name):
-        border_type = Border(
-            left=Side(border_style=border_type_name, color='000000'),
-            right=Side(border_style=border_type_name, color='000000'),
-            top=Side(border_style=border_type_name, color='000000'),
-            bottom=Side(border_style=border_type_name, color='000000'))
-        for row in range(1, self.ws.max_row + 1):
-            for col in range(1, self.ws.max_column + 1):
-                self.ws.cell(row=row, column=col).border = border_type
 
 
 def output(option):
