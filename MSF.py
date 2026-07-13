@@ -95,7 +95,6 @@ def smart_join(massive):
     return '\n'.join(massive)
 
 
-# Новые регулярные выражения для формы SUPPLY
 dict_of_reg_value_SUPPLY = {
     'CR_number': ['change', 'request', 'no'],
     'Reg_date': ['registration', 'date'],
@@ -109,7 +108,7 @@ dict_of_reg_value_SUPPLY = {
     'Descr_tech_sol': ['change', 'description'],
     'Evaluation': ['change', 'evaluation'],
     'SSC': ['building', 'kks'],
-    'TDD_sets': ['tdd', 'code', 'revision', 'version']
+    'TDD_sets': ['tdd', 'code']
 }
 
 dict_of_reg_value_FCR = {
@@ -196,10 +195,11 @@ def main_func(table_name):
 
     text_dump = " ".join([str(cells[k]).lower() for k in cells if cells[k]])
 
-    # Обновленный блок определения типа документа
-    if 'supply of materials' in text_dump or 'к поставке' in text_dump:
+    # Обновленный и более надежный блок определения типа SUPPLY
+    if re_var(['supply', 'materials'], text_dump) or re_var(['поставк'],
+                                                            text_dump):
         doc_mode = 'SUPPLY'
-        print("    Определен тип: SUPPLY")
+        print("    Определен тип: SUPPLY (Запрос на изменение к поставке)")
     elif 'cr.d' in text_dump or 'fcr.d' in text_dump or 'impact on tdd' in text_dump:
         doc_mode = 'CRD'
         print("    Определен тип: CR.D")
@@ -946,9 +946,11 @@ def main_func(table_name):
                             dict_of_reg_value_local.pop(position)
                             break
 
-    # Добавленный блок обработки для типа SUPPLY
+    # === ИСПРАВЛЕННЫЙ ПАРСЕР ДЛЯ SUPPLY ===
     elif doc_mode == 'SUPPLY':
+        print(f"    [Парсер SUPPLY] Начат поиск данных...")
         dict_of_reg_value_local = dict_of_reg_value_SUPPLY.copy()
+
         CR_d = {
             'CR_number': None, 'Reg_date': None, 'CR_coordinator': None,
             'Change_type': None, 'Constr_facility': None,
@@ -968,14 +970,36 @@ def main_func(table_name):
             keys_to_remove = []
             for position in dict_of_reg_value_local:
                 if header_in_reg(cell_text, position, dict_of_reg_value_local):
-                    value_cell = (row, col + 1)
-                    extracted_value = cells.get(value_cell)
+                    print(
+                        f"      -> Найден заголовок: '{position}' (текст: {str(cell_value).replace(chr(10), ' ')})")
+                    extracted_value = None
+
+                    # Ищем ближайшую непустую ячейку справа
+                    for c in range(col + 1, last_cell[1] + 1):
+                        val = cells.get((row, c))
+                        if val is not None and str(
+                                val).strip().lower() not in ['', 'none']:
+                            # Проверяем, не является ли найденный текст другим заголовком (если значение забыли вписать)
+                            is_header = False
+                            for pos in dict_of_reg_value_SUPPLY:
+                                if header_in_reg(str(val).lower(), pos,
+                                                 dict_of_reg_value_SUPPLY):
+                                    is_header = True
+                                    break
+
+                            if not is_header:
+                                extracted_value = val
+
+                            break  # Прерываем поиск в любом случае (нашли значение или уперлись в другой заголовок)
+
+                    print(f"         Извлечено значение: {extracted_value}")
                     CR_d[position] = extracted_value
                     keys_to_remove.append(position)
                     break
 
             for k in keys_to_remove:
                 dict_of_reg_value_local.pop(k, None)
+    # ======================================
 
     elif doc_mode == 'CR':
         dict_of_reg_value_local = dict_of_reg_value_CR.copy()
