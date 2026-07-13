@@ -95,15 +95,17 @@ def smart_join(massive):
     return '\n'.join(massive)
 
 
+# Усиленные регулярные выражения (учитывают похожие поля)
 dict_of_reg_value_SUPPLY = {
-    'CR_number': ['change', 'request', 'no'],
+    'CR_number': [['change', 'request', 'no'], ['internal']],
     'Reg_date': ['registration', 'date'],
     'CR_coordinator': ['change', 'coordinator'],
     'Change_type': ['type', 'change'],
     'Constr_facility': ['construction', 'facility'],
     'Document_type': ['type', 'documentation'],
     'Organization': ['initiator', 'organization'],
-    'Initiator': [['change', 'initiator'], ['organization']],
+    'Initiator': [['change', 'initiator'],
+                  ['organization', 'internal', 'coordinator']],
     'CR_reason': ['change', 'reason'],
     'Descr_tech_sol': ['change', 'description'],
     'Evaluation': ['change', 'evaluation'],
@@ -181,7 +183,7 @@ def main_func(table_name):
     warning = 0
     wb = smart_load_workbook(table_name)
 
-    # --- НОВЫЙ БЛОК ВЫБОРА ВКЛАДКИ ---
+    # --- БЛОК ВЫБОРА ВКЛАДКИ ---
     ws = None
     for sheet in wb.worksheets:
         if 'change request' in sheet.title.lower():
@@ -189,7 +191,6 @@ def main_func(table_name):
             print(f"    [OK] Найдена целевая вкладка: '{sheet.title}'")
             break
 
-    # Если вкладки с таким именем вдруг нет (страховка), ищем первую видимую
     if ws is None:
         print(
             "    [ВНИМАНИЕ] Вкладка 'Change Request' не найдена! Берем первую видимую.")
@@ -990,14 +991,36 @@ def main_func(table_name):
             keys_to_remove = []
             for position in list(dict_of_reg_value_local.keys()):
                 if header_in_reg(cell_text, position, dict_of_reg_value_local):
-                    _, extracted_value = first_not_empty((row, col + 1), cells,
-                                                         'row')
 
-                    CR_d[position] = extracted_value
-                    keys_to_remove.append(position)
+                    # Ищем ВСЕ непустые ячейки в той же строке правее текущей (обходит любые merge мелких колонок)
+                    row_cells = {
+                        k[1]: v for k, v in cells.items()
+                        if
+                        k[0] == row and k[1] > col and v is not None and str(
+                            v).strip() != ''
+                    }
+
+                    extracted_value = None
+                    if row_cells:
+                        # Берем первую ближайшую ячейку справа
+                        next_col = sorted(row_cells.keys())[0]
+                        val = row_cells[next_col]
+
+                        # Проверяем, не является ли она случайно следующим заголовком (если значение забыли вписать)
+                        is_header = False
+                        for pos in dict_of_reg_value_SUPPLY:
+                            if header_in_reg(str(val).lower(), pos,
+                                             dict_of_reg_value_SUPPLY):
+                                is_header = True
+                                break
+
+                        if not is_header:
+                            extracted_value = val
 
                     print(
-                        f"      -> Найдено поле '{position}' в {cell_coords}. Значение: '{extracted_value}'")
+                        f"      -> Найдено: '{position}' | Извлечено: '{extracted_value}'")
+                    CR_d[position] = extracted_value
+                    keys_to_remove.append(position)
                     break
 
             for k in keys_to_remove:
