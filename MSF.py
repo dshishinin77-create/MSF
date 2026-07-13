@@ -158,26 +158,11 @@ dict_of_reg_value_CR = {
 }
 
 
-def parse_supply_cr(wb):
+def parse_supply_cr(ws):
     """
     Парсит документы типа 'Change request for supply of materials'.
-    Ищет ключ в ячейке и забирает значение из ячейки строго справа.
+    Обращается к переданному листу и забирает значение из соседней ячейки.
     """
-    ws = None
-    # Ищем вкладку Change Request
-    for sheet_name in wb.sheetnames:
-        if "change request" in sheet_name.lower():
-            ws = wb[sheet_name]
-            break
-
-    # Если вдруг не нашли по имени, берём активную видимую
-    if not ws:
-        for sheet in wb.worksheets:
-            if sheet.sheet_state == 'visible':
-                ws = sheet
-                break
-
-    # Учтена опечатка "strucrure" со скриншота
     key_mapping = {
         "change request no": "CR_number",
         "registration date": "Reg_date",
@@ -191,34 +176,40 @@ def parse_supply_cr(wb):
         "change description": "Descr_tech_sol",
         "change evaluation": "Evaluation",
         "building / structure kks": "SSC",
-        "building / strucrure kks": "SSC",
+        "building / strucrure kks": "SSC",  # Учтена опечатка
         "tdd code_revision_version": "TDD_sets"
     }
 
-    # Инициализация словаря со значениями null (None)
     parsed_data = {val: None for val in set(key_mapping.values())}
 
     def clean_key_text(text):
         if not text:
             return ""
-        return str(text).lower().replace(':', '').strip()
+        # Убираем двоеточия и переводим в нижний регистр
+        cleaned = str(text).lower().replace(':', '')
+        # Очищаем от переносов строк и двойных пробелов для ключей вроде "Contractor's Change \n Coordinator"
+        return re.sub(r'\s+', ' ', cleaned).strip()
 
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1,
-                            max_col=ws.max_column):
-        for cell in row:
-            if cell.value is not None:
-                cleaned_text = clean_key_text(cell.value)
+    # Проходим по всем заполненным строкам и колонкам листа
+    for row in range(1, ws.max_row + 1):
+        for col in range(1, ws.max_column + 1):
+            cell_val = ws.cell(row=row, column=col).value
 
+            if cell_val is not None:
+                cleaned_text = clean_key_text(cell_val)
+
+                # Проверяем, начинается ли ячейка с нужного нам ключа
                 for search_key, json_key in key_mapping.items():
                     if cleaned_text.startswith(search_key):
-                        value_cell = ws.cell(row=cell.row,
-                                             column=cell.column + 1)
+                        # Смещаемся строго на одну ячейку вправо
+                        value_cell = ws.cell(row=row, column=col + 1)
                         val = value_cell.value
 
                         if val is None or str(val).strip() == "":
                             parsed_data[json_key] = None
                         else:
                             parsed_data[json_key] = val
+
                         break
 
     return parsed_data
@@ -229,11 +220,23 @@ def main_func(table_name):
     print(f'\n>>> Обработка файла: {short_table_name}')
     warning = 0
     wb = smart_load_workbook(table_name)
-    ws = wb.worksheets[0]
-    for sheet in wb.worksheets:
-        if sheet.sheet_state == 'visible':
-            ws = sheet
+
+    # ПРИНУДИТЕЛЬНЫЙ ВЫБОР ЛИСТА "CHANGE REQUEST"
+    ws = None
+    for sheet_name in wb.sheetnames:
+        if "change request" in sheet_name.lower().strip():
+            ws = wb[sheet_name]
             break
+
+    # Если нужный лист не найден по имени, откатываемся к первому видимому
+    if not ws:
+        for sheet in wb.worksheets:
+            if sheet.sheet_state == 'visible':
+                ws = sheet
+                break
+    if not ws:
+        ws = wb.worksheets[0]
+
     cells = ws._cells
     cells = dict(map(lambda x: (x, cells[x].value), cells))
     cells = {
@@ -263,7 +266,11 @@ def main_func(table_name):
         print("    Определен тип: CR")
 
     if doc_mode == 'SUPPLY':
-        return parse_supply_cr(wb)
+        # Передаем найденный нужный лист напрямую в парсер
+        CR_d = parse_supply_cr(ws)
+        print(
+            f'>>> Файл {short_table_name} (Supply) успешно разобран. Формируется JSON...')
+        return CR_d
 
     elif doc_mode == 'CRD':
         dict_of_reg_value_local = dict_of_reg_value_CRD.copy()
@@ -2013,14 +2020,12 @@ def output(option):
         for file in result:
             # Обходим новые файлы SUPPLY, чтобы не упасть при их нормализации
             if isinstance(result[file], dict) and 'TDD_sets' in result[file]:
-                # Значит это плоский словарь от новой функции SUPPLY, пропускаем
                 continue
             a = dicts_normalization(file)
             from_diff_to_union_excel(a)
     else:
         for dictus in result:
             if result.get(dictus):
-                # Добавлен безопасный обход для новых словарей SUPPLY
                 tdd_data = result[dictus].get('TDD')
                 if isinstance(tdd_data, dict):
                     for code in tdd_data:
