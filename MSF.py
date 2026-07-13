@@ -1,4 +1,3 @@
-from ast import Dict
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 import re
@@ -11,7 +10,7 @@ import traceback
 
 
 def smart_load_workbook(file_path):
-    return load_workbook(file_path)
+    return load_workbook(file_path, data_only=True)
 
 
 def get_cell(ini_cell, row, column):
@@ -95,24 +94,6 @@ def smart_join(massive):
     return '\n'.join(massive)
 
 
-# Усиленные регулярные выражения (учитывают похожие поля)
-dict_of_reg_value_SUPPLY = {
-    'CR_number': [['change', 'request', 'no'], ['internal']],
-    'Reg_date': ['registration', 'date'],
-    'CR_coordinator': ['change', 'coordinator'],
-    'Change_type': ['type', 'change'],
-    'Constr_facility': ['construction', 'facility'],
-    'Document_type': ['type', 'documentation'],
-    'Organization': ['initiator', 'organization'],
-    'Initiator': [['change', 'initiator'],
-                  ['organization', 'internal', 'coordinator']],
-    'CR_reason': ['change', 'reason'],
-    'Descr_tech_sol': ['change', 'description'],
-    'Evaluation': ['change', 'evaluation'],
-    'SSC': ['building', 'kks'],
-    'TDD_sets': ['tdd', 'code']
-}
-
 dict_of_reg_value_FCR = {
     'CR_number': [['(change.*request|registr|bejegyz)'], ['init']],
     'Reg_date': ['registr', 'dat'],
@@ -177,60 +158,114 @@ dict_of_reg_value_CR = {
 }
 
 
+def parse_supply_cr(wb):
+    """
+    Парсит документы типа 'Change request for supply of materials'.
+    Ищет ключ в ячейке и забирает значение из ячейки строго справа.
+    """
+    ws = None
+    # Ищем вкладку Change Request
+    for sheet_name in wb.sheetnames:
+        if "change request" in sheet_name.lower():
+            ws = wb[sheet_name]
+            break
+
+    # Если вдруг не нашли по имени, берём активную видимую
+    if not ws:
+        for sheet in wb.worksheets:
+            if sheet.sheet_state == 'visible':
+                ws = sheet
+                break
+
+    # Учтена опечатка "strucrure" со скриншота
+    key_mapping = {
+        "change request no": "CR_number",
+        "registration date": "Reg_date",
+        "contractor's change coordinator": "CR_coordinator",
+        "type of changes": "Change_type",
+        "construction facility": "Constr_facility",
+        "type of documentation to be changed": "Document_type",
+        "initiator's organization": "Organization",
+        "change initiator": "Initiator",
+        "change reason": "CR_reason",
+        "change description": "Descr_tech_sol",
+        "change evaluation": "Evaluation",
+        "building / structure kks": "SSC",
+        "building / strucrure kks": "SSC",
+        "tdd code_revision_version": "TDD_sets"
+    }
+
+    # Инициализация словаря со значениями null (None)
+    parsed_data = {val: None for val in set(key_mapping.values())}
+
+    def clean_key_text(text):
+        if not text:
+            return ""
+        return str(text).lower().replace(':', '').strip()
+
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1,
+                            max_col=ws.max_column):
+        for cell in row:
+            if cell.value is not None:
+                cleaned_text = clean_key_text(cell.value)
+
+                for search_key, json_key in key_mapping.items():
+                    if cleaned_text.startswith(search_key):
+                        value_cell = ws.cell(row=cell.row,
+                                             column=cell.column + 1)
+                        val = value_cell.value
+
+                        if val is None or str(val).strip() == "":
+                            parsed_data[json_key] = None
+                        else:
+                            parsed_data[json_key] = val
+                        break
+
+    return parsed_data
+
+
 def main_func(table_name):
     short_table_name = table_name.split('\\')[-1]
     print(f'\n>>> Обработка файла: {short_table_name}')
     warning = 0
     wb = smart_load_workbook(table_name)
-
-    # --- БЛОК ВЫБОРА ВКЛАДКИ ---
-    ws = None
+    ws = wb.worksheets[0]
     for sheet in wb.worksheets:
-        if 'change request' in sheet.title.lower():
+        if sheet.sheet_state == 'visible':
             ws = sheet
-            print(f"    [OK] Найдена целевая вкладка: '{sheet.title}'")
             break
-
-    if ws is None:
-        print(
-            "    [ВНИМАНИЕ] Вкладка 'Change Request' не найдена! Берем первую видимую.")
-        ws = wb.worksheets[0]
-        for sheet in wb.worksheets:
-            if sheet.sheet_state == 'visible':
-                ws = sheet
-                break
-    # ---------------------------------
-
     cells = ws._cells
     cells = dict(map(lambda x: (x, cells[x].value), cells))
     cells = {
         key: cells[key] if not re_var(['unnamed'], str(cells[key])) else None
         for key in cells}
 
-    if not cells:
-        print("    [ОШИБКА] Выбранная вкладка пуста!")
-        return {}
-
-    last_cell = list(cells.keys())[-1]
     first_cell = first_cell_def(cells)
+    if first_cell:
+        last_cell = list(cells.keys())[-1]
+    else:
+        last_cell = (1, 1)
 
     text_dump = " ".join([str(cells[k]).lower() for k in cells if cells[k]])
 
-    if re_var(['supply'], text_dump) or re_var(['поставк'], text_dump):
+    # Расширенное определение типа документа
+    if 'supply of materials' in text_dump or 'поставке' in text_dump:
         doc_mode = 'SUPPLY'
-        print(
-            "    Определен тип документа: SUPPLY (Запрос на изменение к поставке)")
+        print("    Определен тип: SUPPLY")
     elif 'cr.d' in text_dump or 'fcr.d' in text_dump or 'impact on tdd' in text_dump:
         doc_mode = 'CRD'
-        print("    Определен тип документа: CR.D")
+        print("    Определен тип: CR.D")
     elif 'field change request' in text_dump or 'fcr' in text_dump:
         doc_mode = 'FCR'
-        print("    Определен тип документа: FCR")
+        print("    Определен тип: FCR")
     else:
         doc_mode = 'CR'
-        print("    Определен тип документа: CR")
+        print("    Определен тип: CR")
 
-    if doc_mode == 'CRD':
+    if doc_mode == 'SUPPLY':
+        return parse_supply_cr(wb)
+
+    elif doc_mode == 'CRD':
         dict_of_reg_value_local = dict_of_reg_value_CRD.copy()
         CR_d = {
             'General_information': {
@@ -966,67 +1001,6 @@ def main_func(table_name):
                             dict_of_reg_value_local.pop(position)
                             break
 
-
-    # === ИСПРАВЛЕННЫЙ ПАРСЕР ДЛЯ SUPPLY ===
-    elif doc_mode == 'SUPPLY':
-        print(f"    [Парсер SUPPLY] Начат поиск данных...")
-        dict_of_reg_value_local = dict_of_reg_value_SUPPLY.copy()
-
-        CR_d = {
-            'CR_number': None, 'Reg_date': None, 'CR_coordinator': None,
-            'Change_type': None, 'Constr_facility': None,
-            'Document_type': None,
-            'Organization': None, 'Initiator': None, 'CR_reason': None,
-            'Descr_tech_sol': None, 'Evaluation': None, 'SSC': None,
-            'TDD_sets': None
-        }
-
-        for cell_coords, cell_value in cells.items():
-            if not cell_value:
-                continue
-
-            cell_text = str(cell_value).lower()
-            row, col = cell_coords
-
-            keys_to_remove = []
-            for position in list(dict_of_reg_value_local.keys()):
-                if header_in_reg(cell_text, position, dict_of_reg_value_local):
-
-                    # Ищем ВСЕ непустые ячейки в той же строке правее текущей (обходит любые merge мелких колонок)
-                    row_cells = {
-                        k[1]: v for k, v in cells.items()
-                        if
-                        k[0] == row and k[1] > col and v is not None and str(
-                            v).strip() != ''
-                    }
-
-                    extracted_value = None
-                    if row_cells:
-                        # Берем первую ближайшую ячейку справа
-                        next_col = sorted(row_cells.keys())[0]
-                        val = row_cells[next_col]
-
-                        # Проверяем, не является ли она случайно следующим заголовком (если значение забыли вписать)
-                        is_header = False
-                        for pos in dict_of_reg_value_SUPPLY:
-                            if header_in_reg(str(val).lower(), pos,
-                                             dict_of_reg_value_SUPPLY):
-                                is_header = True
-                                break
-
-                        if not is_header:
-                            extracted_value = val
-
-                    print(
-                        f"      -> Найдено: '{position}' | Извлечено: '{extracted_value}'")
-                    CR_d[position] = extracted_value
-                    keys_to_remove.append(position)
-                    break
-
-            for k in keys_to_remove:
-                dict_of_reg_value_local.pop(k, None)
-    # ======================================
-
     elif doc_mode == 'CR':
         dict_of_reg_value_local = dict_of_reg_value_CR.copy()
 
@@ -1617,15 +1591,6 @@ def dicts_normalization(original_dict_name):
     return normalized_dict
 
 
-def open_dict(obj, ini_str):
-    for key in obj:
-        if type(obj[key]) is dict:
-            print(f"{ini_str * '   '}{key}:")
-            open_dict(obj[key], ini_str + 1)
-        else:
-            print(f"{ini_str * '   '}{key}:   {obj[key]}")
-
-
 def opener(dictus, spc, form='xml'):
     filler = '    '
     if form == 'xml':
@@ -1952,6 +1917,49 @@ def from_diff_to_union_excel(normalized_dict):
     return normalized_dict['File_name']
 
 
+class excel_formating:
+    def __init__(self, ws):
+        self.ws = ws
+
+    def col_width(self, lett_list: list, value):
+        for letter in lett_list:
+            self.ws.column_dimensions[letter].width = value
+
+    def text_alignment(self, place: list or str, hor, vert):
+        if type(place) is list:
+            cell = self.ws.cell(*place)
+        else:
+            cell = self.ws[place]
+        cell.alignment = Alignment(horizontal=hor, vertical=vert,
+                                   wrapText=True)
+
+    def color(self, place: list, start_col: str, end_col: str):
+        cell = self.ws.cell(*place)
+        filling = PatternFill(start_color=start_col, end_color=end_col,
+                              fill_type='solid')
+        cell.fill = filling
+
+    def text_font(self, place: list, text_size: int, text_bold=False):
+        cell = self.ws.cell(*place)
+        cell.font = Font(bold=text_bold, size=text_size)
+
+    def sheet_view(self, page_number):
+        self.ws.sheet_view.view = 'pageBreakPreview'
+        self.ws.page_setup.fitToPage = True
+        self.ws.page_setup.fitToWidth = page_number
+        self.ws.page_setup.fitToHeight = False
+
+    def borders(self, border_type_name):
+        border_type = Border(
+            left=Side(border_style=border_type_name, color='000000'),
+            right=Side(border_style=border_type_name, color='000000'),
+            top=Side(border_style=border_type_name, color='000000'),
+            bottom=Side(border_style=border_type_name, color='000000'))
+        for row in range(1, self.ws.max_row + 1):
+            for col in range(1, self.ws.max_column + 1):
+                self.ws.cell(row=row, column=col).border = border_type
+
+
 def output(option):
     global result
 
@@ -2003,21 +2011,28 @@ def output(option):
 
     if option == 0:
         for file in result:
+            # Обходим новые файлы SUPPLY, чтобы не упасть при их нормализации
+            if isinstance(result[file], dict) and 'TDD_sets' in result[file]:
+                # Значит это плоский словарь от новой функции SUPPLY, пропускаем
+                continue
             a = dicts_normalization(file)
             from_diff_to_union_excel(a)
     else:
         for dictus in result:
             if result.get(dictus):
-                for code in result[dictus].get('TDD', {}):
-                    if 'Impact' in result[dictus]['TDD'][code] and isinstance(
-                            result[dictus]['TDD'][code]['Impact'], int):
-                        bin_impact = f"{result[dictus]['TDD'][code]['Impact']:05b}"
-                        bin_impact = [True if int(i) else False for i in
-                                      bin_impact]
-                        result[dictus]['TDD'][code]['Impact'] = {
-                            'NS': bin_impact[0], 'FS': bin_impact[1],
-                            'IS': bin_impact[2], 'ES': bin_impact[3],
-                            'SS': bin_impact[4]}
+                # Добавлен безопасный обход для новых словарей SUPPLY
+                tdd_data = result[dictus].get('TDD')
+                if isinstance(tdd_data, dict):
+                    for code in tdd_data:
+                        if 'Impact' in tdd_data[code] and isinstance(
+                                tdd_data[code]['Impact'], int):
+                            bin_impact = f"{tdd_data[code]['Impact']:05b}"
+                            bin_impact = [True if int(i) else False for i in
+                                          bin_impact]
+                            tdd_data[code]['Impact'] = {
+                                'NS': bin_impact[0], 'FS': bin_impact[1],
+                                'IS': bin_impact[2], 'ES': bin_impact[3],
+                                'SS': bin_impact[4]}
 
                 short_name = '.'.join(dictus.split('.')[:-1])
                 file_name = excel_path + short_name + '.txt' if excel_path else short_name + '.txt'
