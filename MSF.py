@@ -95,10 +95,11 @@ def smart_join(massive):
     return '\n'.join(massive)
 
 
+# Немного ослабили регулярки для 100% срабатывания
 dict_of_reg_value_SUPPLY = {
     'CR_number': ['change', 'request', 'no'],
     'Reg_date': ['registration', 'date'],
-    'CR_coordinator': ['contractor', 'coordinator'],
+    'CR_coordinator': ['change', 'coordinator'],
     'Change_type': ['type', 'change'],
     'Constr_facility': ['construction', 'facility'],
     'Document_type': ['type', 'documentation'],
@@ -195,9 +196,8 @@ def main_func(table_name):
 
     text_dump = " ".join([str(cells[k]).lower() for k in cells if cells[k]])
 
-    # Обновленный и более надежный блок определения типа SUPPLY
-    if re_var(['supply', 'materials'], text_dump) or re_var(['поставк'],
-                                                            text_dump):
+    # Расширенное условие, чтобы точно не пропустить SUPPLY форму
+    if re_var(['supply'], text_dump) or re_var(['поставк'], text_dump):
         doc_mode = 'SUPPLY'
         print("    Определен тип: SUPPLY (Запрос на изменение к поставке)")
     elif 'cr.d' in text_dump or 'fcr.d' in text_dump or 'impact on tdd' in text_dump:
@@ -946,6 +946,7 @@ def main_func(table_name):
                             dict_of_reg_value_local.pop(position)
                             break
 
+
     # === ИСПРАВЛЕННЫЙ ПАРСЕР ДЛЯ SUPPLY ===
     elif doc_mode == 'SUPPLY':
         print(f"    [Парсер SUPPLY] Начат поиск данных...")
@@ -968,33 +969,20 @@ def main_func(table_name):
             row, col = cell_coords
 
             keys_to_remove = []
-            for position in dict_of_reg_value_local:
+            # Итерируемся по списку ключей, чтобы безопасно удалять их
+            for position in list(dict_of_reg_value_local.keys()):
                 if header_in_reg(cell_text, position, dict_of_reg_value_local):
-                    print(
-                        f"      -> Найден заголовок: '{position}' (текст: {str(cell_value).replace(chr(10), ' ')})")
-                    extracted_value = None
+                    # Железобетонный метод извлечения значения (ячейка справа col+1)
+                    # Если сама по себе ячейка col+1 в словаре 'пустая', first_not_empty найдет её
+                    _, extracted_value = first_not_empty((row, col + 1), cells,
+                                                         'row')
 
-                    # Ищем ближайшую непустую ячейку справа
-                    for c in range(col + 1, last_cell[1] + 1):
-                        val = cells.get((row, c))
-                        if val is not None and str(
-                                val).strip().lower() not in ['', 'none']:
-                            # Проверяем, не является ли найденный текст другим заголовком (если значение забыли вписать)
-                            is_header = False
-                            for pos in dict_of_reg_value_SUPPLY:
-                                if header_in_reg(str(val).lower(), pos,
-                                                 dict_of_reg_value_SUPPLY):
-                                    is_header = True
-                                    break
-
-                            if not is_header:
-                                extracted_value = val
-
-                            break  # Прерываем поиск в любом случае (нашли значение или уперлись в другой заголовок)
-
-                    print(f"         Извлечено значение: {extracted_value}")
                     CR_d[position] = extracted_value
                     keys_to_remove.append(position)
+
+                    # Печатаем прямо в консоль для дебага
+                    print(
+                        f"      -> Найдено поле '{position}' в {cell_coords}. Значение: '{extracted_value}'")
                     break
 
             for k in keys_to_remove:
