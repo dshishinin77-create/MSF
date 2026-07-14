@@ -77,7 +77,8 @@ def main_func(table_name):
 
     # Итоговый словарь, изначально заполненный None
     CR_d = {key: None for key in dict_of_keys.keys()}
-    CR_d['SSC'] = []  # Инициализируем как пустой список
+    CR_d['SSC'] = {}
+    CR_d['TDD_sets'] = {}
 
     max_col = ws.max_column
     max_row = ws.max_row
@@ -128,17 +129,17 @@ def main_func(table_name):
                 if matched_key == 'SSC':
                     if extracted_value:
                         val_str = str(extracted_value).strip()
-                        # Сохраняем в виде списка (массива) строк для валидности JSON
+                        # Сохраняем как ключи словаря, чтобы на выходе были фигурные скобки {}
                         lines = [line.strip() for line in
                                  re.split(r'\n|\s{2,}', val_str) if
                                  line.strip()]
-                        CR_d[matched_key] = lines
+                        CR_d[matched_key] = {line: {} for line in lines}
                 elif matched_key == 'TDD_sets':
                     if extracted_value:
                         val_str = str(extracted_value).strip()
-                        # Убираем все переносы строк и двойные пробелы, выводим одной строкой
+                        # Убираем все переносы строк, делаем одной строкой и кладем в словарь
                         single_line_str = re.sub(r'\s+', ' ', val_str)
-                        CR_d[matched_key] = single_line_str
+                        CR_d[matched_key] = {single_line_str: {}}
                 else:
                     CR_d[matched_key] = extracted_value
 
