@@ -56,7 +56,7 @@ def main_func(table_name):
             "    [ОШИБКА] Вкладка 'Change Request' не найдена! Пропускаем файл.")
         return None
 
-    # 2. Словарь регулярных выражений для поиска ключей (добавлены стоп-слова)
+    # 2. Словарь регулярных выражений для поиска ключей (со стоп-словами)
     dict_of_keys = {
         'CR_number': [['change', 'request', 'no'], ['internal']],
         'Reg_date': ['registration', 'date'],
@@ -69,18 +69,15 @@ def main_func(table_name):
                       ['organization', 'internal', 'coordinator']],
         'Initiator_internal_CR': ['initiator', 'internal', 'cr'],
         'CR_reason': [['change', 'reason'], ['&', 'description']],
-        # Стоп-слово для серого заголовка
         'Descr_tech_sol': [['change', 'description'], ['&', 'reason']],
-        # Стоп-слово для серого заголовка
         'Evaluation': ['change', 'evaluation'],
         'SSC': ['building', 'kks'],
         'TDD_sets': ['tdd', 'code']
     }
 
-    # Итоговый словарь
+    # Итоговый словарь, изначально заполненный None
     CR_d = {key: None for key in dict_of_keys.keys()}
-    CR_d['SSC'] = {}
-    CR_d['TDD_sets'] = {}
+    CR_d['SSC'] = []  # Инициализируем как пустой список
 
     max_col = ws.max_column
     max_row = ws.max_row
@@ -127,15 +124,21 @@ def main_func(table_name):
                 print(
                     f"      -> Найдено: {matched_key} | Значение: {extracted_value}")
 
-                # Формируем отдельные вложенные блоки
-                if matched_key in ['SSC', 'TDD_sets']:
+                # Формируем итоговые значения в зависимости от ключа
+                if matched_key == 'SSC':
                     if extracted_value:
                         val_str = str(extracted_value).strip()
-                        # Режем либо по переносам строк (Alt+Enter), либо по двойным пробелам
+                        # Сохраняем в виде списка (массива) строк для валидности JSON
                         lines = [line.strip() for line in
                                  re.split(r'\n|\s{2,}', val_str) if
                                  line.strip()]
-                        CR_d[matched_key] = {line: {} for line in lines}
+                        CR_d[matched_key] = lines
+                elif matched_key == 'TDD_sets':
+                    if extracted_value:
+                        val_str = str(extracted_value).strip()
+                        # Убираем все переносы строк и двойные пробелы, выводим одной строкой
+                        single_line_str = re.sub(r'\s+', ' ', val_str)
+                        CR_d[matched_key] = single_line_str
                 else:
                     CR_d[matched_key] = extracted_value
 
