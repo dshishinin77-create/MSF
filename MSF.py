@@ -8,7 +8,7 @@ import traceback
 
 
 def smart_load_workbook(file_path):
-    # data_only=True ускоряет чтение и берет только значения (без формул)
+    # data_only=True ускоряет чтение и берет только значения (без формул и стилей)
     return load_workbook(file_path, data_only=True)
 
 
@@ -56,7 +56,7 @@ def main_func(table_name):
             "    [ОШИБКА] Вкладка 'Change Request' не найдена! Пропускаем файл.")
         return None
 
-    # 2. Словарь регулярных выражений для поиска ключей
+    # 2. Словарь регулярных выражений для поиска ключей (добавлены стоп-слова)
     dict_of_keys = {
         'CR_number': [['change', 'request', 'no'], ['internal']],
         'Reg_date': ['registration', 'date'],
@@ -67,16 +67,17 @@ def main_func(table_name):
         'Organization': ['initiator', 'organization'],
         'Initiator': [['change', 'initiator'],
                       ['organization', 'internal', 'coordinator']],
-        'Initiator_internal_CR': ['initiator', 'internal', 'cr'],  # Новое поле
+        'Initiator_internal_CR': ['initiator', 'internal', 'cr'],
         'CR_reason': [['change', 'reason'], ['&', 'description']],
-        # Добавлены стоп-слова для пропуска серых заголовков
-        'Descr_tech_sol': ['change', 'description'],
+        # Стоп-слово для серого заголовка
+        'Descr_tech_sol': [['change', 'description'], ['&', 'reason']],
+        # Стоп-слово для серого заголовка
         'Evaluation': ['change', 'evaluation'],
         'SSC': ['building', 'kks'],
         'TDD_sets': ['tdd', 'code']
     }
 
-    # Итоговый словарь, изначально заполненный None и пустыми словарями
+    # Итоговый словарь
     CR_d = {key: None for key in dict_of_keys.keys()}
     CR_d['SSC'] = {}
     CR_d['TDD_sets'] = {}
@@ -126,18 +127,20 @@ def main_func(table_name):
                 print(
                     f"      -> Найдено: {matched_key} | Значение: {extracted_value}")
 
-                # Создаем отдельные блоки для SSC и TDD_sets
+                # Формируем отдельные вложенные блоки
                 if matched_key in ['SSC', 'TDD_sets']:
                     if extracted_value:
                         val_str = str(extracted_value).strip()
-                        # Разбиваем по переносам строки внутри ячейки Excel
-                        lines = [line.strip() for line in val_str.split('\n')
-                                 if line.strip()]
+                        # Режем либо по переносам строк (Alt+Enter), либо по двойным пробелам
+                        lines = [line.strip() for line in
+                                 re.split(r'\n|\s{2,}', val_str) if
+                                 line.strip()]
                         CR_d[matched_key] = {line: {} for line in lines}
                 else:
                     CR_d[matched_key] = extracted_value
 
-                dict_of_keys.pop(matched_key, None)  # Удаляем найденный ключ
+                dict_of_keys.pop(matched_key,
+                                 None)  # Удаляем найденный ключ, чтобы не искать дважды
 
     print(f'>>> Файл {short_table_name} успешно разобран.')
     return CR_d
