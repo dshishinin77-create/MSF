@@ -8,7 +8,7 @@ import traceback
 
 
 def smart_load_workbook(file_path):
-    # data_only=True ускоряет чтение и берет только значения (без формул и стилей)
+    # data_only=True ускоряет чтение и берет только значения (без формул)
     return load_workbook(file_path, data_only=True)
 
 
@@ -67,15 +67,19 @@ def main_func(table_name):
         'Organization': ['initiator', 'organization'],
         'Initiator': [['change', 'initiator'],
                       ['organization', 'internal', 'coordinator']],
-        'CR_reason': ['change', 'reason'],
+        'Initiator_internal_CR': ['initiator', 'internal', 'cr'],  # Новое поле
+        'CR_reason': [['change', 'reason'], ['&', 'description']],
+        # Добавлены стоп-слова для пропуска серых заголовков
         'Descr_tech_sol': ['change', 'description'],
         'Evaluation': ['change', 'evaluation'],
         'SSC': ['building', 'kks'],
         'TDD_sets': ['tdd', 'code']
     }
 
-    # Итоговый словарь, изначально заполненный None
+    # Итоговый словарь, изначально заполненный None и пустыми словарями
     CR_d = {key: None for key in dict_of_keys.keys()}
+    CR_d['SSC'] = {}
+    CR_d['TDD_sets'] = {}
 
     max_col = ws.max_column
     max_row = ws.max_row
@@ -121,9 +125,19 @@ def main_func(table_name):
 
                 print(
                     f"      -> Найдено: {matched_key} | Значение: {extracted_value}")
-                CR_d[matched_key] = extracted_value
-                dict_of_keys.pop(matched_key,
-                                 None)  # Удаляем найденный ключ, чтобы не искать дважды
+
+                # Создаем отдельные блоки для SSC и TDD_sets
+                if matched_key in ['SSC', 'TDD_sets']:
+                    if extracted_value:
+                        val_str = str(extracted_value).strip()
+                        # Разбиваем по переносам строки внутри ячейки Excel
+                        lines = [line.strip() for line in val_str.split('\n')
+                                 if line.strip()]
+                        CR_d[matched_key] = {line: {} for line in lines}
+                else:
+                    CR_d[matched_key] = extracted_value
+
+                dict_of_keys.pop(matched_key, None)  # Удаляем найденный ключ
 
     print(f'>>> Файл {short_table_name} успешно разобран.')
     return CR_d
