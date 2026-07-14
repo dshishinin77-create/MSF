@@ -75,10 +75,13 @@ def main_func(table_name):
         'TDD_sets': ['tdd', 'code']
     }
 
-    # Итоговый словарь, изначально заполненный None
-    CR_d = {key: None for key in dict_of_keys.keys()}
-    CR_d['SSC'] = {}
-    CR_d['TDD_sets'] = {}
+    # Итоговый словарь: General_information для основных полей, SSC и TDD_sets отдельно
+    CR_d = {
+        'General_information': {key: None for key in dict_of_keys if
+                                key not in ['SSC', 'TDD_sets']},
+        'SSC': {},
+        'TDD_sets': {}
+    }
 
     max_col = ws.max_column
     max_row = ws.max_row
@@ -125,7 +128,7 @@ def main_func(table_name):
                 print(
                     f"      -> Найдено: {matched_key} | Значение: {extracted_value}")
 
-                # Формируем итоговые значения в зависимости от ключа
+                # Сохраняем значения в соответствии с новой структурой
                 if matched_key == 'SSC':
                     if extracted_value:
                         val_str = str(extracted_value).strip()
@@ -133,15 +136,15 @@ def main_func(table_name):
                         lines = [line.strip() for line in
                                  re.split(r'\n|\s{2,}', val_str) if
                                  line.strip()]
-                        CR_d[matched_key] = {line: {} for line in lines}
+                        CR_d['SSC'] = {line: {} for line in lines}
                 elif matched_key == 'TDD_sets':
                     if extracted_value:
                         val_str = str(extracted_value).strip()
                         # Убираем все переносы строк, делаем одной строкой и кладем в словарь
                         single_line_str = re.sub(r'\s+', ' ', val_str)
-                        CR_d[matched_key] = {single_line_str: {}}
+                        CR_d['TDD_sets'] = {single_line_str: {}}
                 else:
-                    CR_d[matched_key] = extracted_value
+                    CR_d['General_information'][matched_key] = extracted_value
 
                 dict_of_keys.pop(matched_key,
                                  None)  # Удаляем найденный ключ, чтобы не искать дважды
