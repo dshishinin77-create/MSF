@@ -67,7 +67,7 @@ def main_func(table_name):
         'Organization': ['initiator', 'organization'],
         'Initiator': [['change', 'initiator'],
                       ['organization', 'internal', 'coordinator']],
-        'Initiator_internal_CR': ['initiator', 'internal', 'cr'],
+        'CR_number_int': ['initiator', 'internal', 'cr'],
         'CR_reason': [['change', 'reason'], ['&', 'description']],
         'Descr_tech_sol': [['change', 'description'], ['&', 'reason']],
         'Evaluation': ['change', 'evaluation'],
